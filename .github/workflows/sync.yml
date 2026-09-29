@@ -1,1 +1,98 @@
-bmFtZTogU3luYyBmcm9tIHVwc3RyZWFtIGRkZ2tzZjIwMTMvUHJvZmlsZQoKb246CiAgc2NoZWR1bGU6CiAgICAtIGNyb246ICcwIDIgKiAqIConCiAgd29ya2Zsb3dfZGlzcGF0Y2g6Cgpqb2JzOgogIHN5bmM6CiAgICBydW5zLW9uOiB1YnVudHUtbGF0ZXN0CiAgICBzdGVwczoKICAgICAgLSBuYW1lOiBTeW5jIHVwc3RyZWFtCiAgICAgICAgdXNlczogYW9ybXNieS9Gb3JrLVN5bmMtV2l0aC1VcHN0cmVhbS1hY3Rpb25AdjMuNAogICAgICAgIHdpdGg6CiAgICAgICAgICB0YXJnZXRfc3luY19icmFuY2g6IG1hc3RlcgogICAgICAgICAgdGFyZ2V0X3JlcG9fdG9rZW46ICR7eyBzZWNyZXRzLkdJVEhVQl9UT0tFTiB9fQogICAgICAgICAgdXBzdHJlYW1fc3luY19yZXBvOiBkZGdrc2YyMDEzL1Byb2ZpbGUKICAgICAgICAgIHVwc3RyZWFtX3N5bmNfYnJhbmNoOiBtYXN0ZXIKICAgICAgICAgIHRlc3RfbW9kZTogZmFsc2UK
+name: Sync from upstream ddgksf2013/Profile
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      sync_test_mode:
+        description: 'Fork Sync Test Mode'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Sync upstream to upstream-master
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.3
+        id: sync
+        with:
+          target_sync_branch: upstream-master
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
+          upstream_sync_repo: ddgksf2013/Profile
+          upstream_sync_branch: master
+          test_mode: ${{ inputs.sync_test_mode || false }}
+
+      - name: Build custom master
+        if: (steps.sync.outputs.has_new_commits == 'true' || github.event_name == 'workflow_dispatch') && (inputs.sync_test_mode != 'true' && inputs.sync_test_mode != true)
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Fetch the newly synced upstream-master
+          git fetch origin upstream-master
+          
+          # We want to replace all files with upstream's files, except our custom ones.
+          # Remove all tracked files
+          git rm -rfq .
+          
+          # Checkout all files from upstream-master
+          git checkout origin/upstream-master -- .
+          
+          # Restore our custom protective directories and files from master HEAD
+          git checkout HEAD -- .github/ || true
+          git checkout HEAD -- CUSTOM_PATCH.md || true
+          
+          # Run customization patch on the upstream's QuantumultX.conf
+          python .github/scripts/customize_quantumultx.py
+          
+          # Verify protections
+          # Verify freeSub
+          grep -q "tag=🐟临时使用, update-interval=3600, opt-parser=true, enabled=false" QuantumultX.conf || (echo "Verification failed: freeSub is not disabled" && exit 1)
+          
+          # Verify check-interval=900
+          count=$(grep -c "^url-latency-benchmark=.*check-interval=900" QuantumultX.conf)
+          if [ "$count" -lt 5 ]; then
+             echo "Verification failed: check-interval=900 not found as expected"
+             exit 1
+          fi
+
+          # Verify tolerance=0
+          grep -q "^url-latency-benchmark=.*tolerance=0" QuantumultX.conf || (echo "Verification failed: tolerance=0 not found" && exit 1)
+
+          # Verify Emojis
+          grep -q "🇭🇰" QuantumultX.conf || (echo "Verification failed: 🇭🇰 not found" && exit 1)
+          grep -q "🇹🇼" QuantumultX.conf || (echo "Verification failed: 🇹🇼 not found" && exit 1)
+          grep -q "🇯🇵" QuantumultX.conf || (echo "Verification failed: 🇯🇵 not found" && exit 1)
+          grep -q "🇸🇬" QuantumultX.conf || (echo "Verification failed: 🇸🇬 not found" && exit 1)
+          grep -q "🇺🇸" QuantumultX.conf || (echo "Verification failed: 🇺🇸 not found" && exit 1)
+
+          # Verify parser URL
+          grep -q "resource_parser_url=https://raw.githubusercontent.com/hanhan-ggit/QuantumultX/master/Scripts/resource-parser.js" QuantumultX.conf || (echo "Verification failed: hanhan-ggit parser not found" && exit 1)
+
+          echo "All verifications passed."
+          
+          # Commit and Push
+          git add .
+          if git diff --cached --quiet; then
+            echo "No changes to commit in master."
+          else
+            git commit -m "chore: sync upstream and apply custom patches"
+            git push origin master
+          fi
+
+      - name: Test Mode Verification
+        if: inputs.sync_test_mode == true || inputs.sync_test_mode == 'true'
+        run: |
+          echo "Test mode is enabled. Changes were not applied to master."
+          echo "Sync output: has_new_commits=${{ steps.sync.outputs.has_new_commits }}"
