@@ -24,14 +24,26 @@ jobs:
           fetch-depth: 0
 
       - name: Sync upstream to upstream-master
-        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.3
         id: sync
-        with:
-          target_sync_branch: upstream-master
-          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
-          upstream_sync_repo: ddgksf2013/Profile
-          upstream_sync_branch: master
-          test_mode: ${{ inputs.sync_test_mode || false }}
+        run: |
+          git remote add upstream https://github.com/ddgksf2013/Profile.git
+          git fetch upstream master
+          git fetch origin upstream-master || true
+          
+          UPSTREAM_SHA=$(git rev-parse upstream/master)
+          CURRENT_SHA=$(git rev-parse origin/upstream-master 2>/dev/null || echo "none")
+          
+          if [ "$UPSTREAM_SHA" == "$CURRENT_SHA" ]; then
+            echo "has_new_commits=false" >> $GITHUB_OUTPUT
+            echo "No new commits to sync."
+          else
+            echo "has_new_commits=true" >> $GITHUB_OUTPUT
+            echo "New commits found! Syncing..."
+            git checkout -B upstream-master upstream/master
+            if [ "${{ inputs.sync_test_mode }}" != "true" ]; then
+              git push -f origin upstream-master
+            fi
+          fi
 
       - name: Build custom master
         if: (steps.sync.outputs.has_new_commits == 'true' || github.event_name == 'workflow_dispatch') && (inputs.sync_test_mode != 'true' && inputs.sync_test_mode != true)
