@@ -65,6 +65,12 @@ jobs:
           git checkout HEAD -- .github/ || true
           git checkout HEAD -- CUSTOM_PATCH.md || true
           
+          # Restore files/folders upstream has deleted but we maintain locally
+          [ -f QuantumultX.conf ] || git checkout HEAD -- QuantumultX.conf || true
+          [ -d filter ] || git checkout HEAD -- filter/ || true
+          [ -d rewrite ] || git checkout HEAD -- rewrite/ || true
+          [ -d scripts ] || git checkout HEAD -- scripts/ || true
+          
           # Run customization patch on the upstream's QuantumultX.conf
           python .github/scripts/customize_quantumultx.py
           
