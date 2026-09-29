@@ -1,0 +1,65 @@
+name: Auto-sync scripts from ddgksf2013.top
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 每天北京时间 10:00 执行
+  workflow_dispatch:       # 支持手动触发
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Fetch protected files from ddgksf2013.top
+        run: |
+          mkdir -p rewrite scripts filter
+
+          UA="QuantumultX/1.0.30 (iPhone; iOS 17.0; Scale/3.00)"
+
+          fetch_file() {
+            local url="$1"
+            local dest="$2"
+            local tmp=$(mktemp)
+            http_code=$(curl -s -w "%{http_code}" -A "$UA" -L --max-time 30 -o "$tmp" "$url")
+            if [ "$http_code" = "200" ]; then
+              # 检查是否为真实内容（不是HTML页面）
+              if ! grep -q '<!DOCTYPE' "$tmp" 2>/dev/null && ! grep -q '<html' "$tmp" 2>/dev/null; then
+                mv "$tmp" "$dest"
+                echo "✅ $dest"
+              else
+                echo "⚠️ $url 返回了HTML，跳过"
+                rm -f "$tmp"
+              fi
+            else
+              echo "❌ $url 请求失败 (HTTP $http_code)"
+              rm -f "$tmp"
+            fi
+          }
+
+          BASE="https://ddgksf2013.top"
+
+          fetch_file "$BASE/rewrite/BiliBiliAdsLite.conf"  "rewrite/BiliBiliAdsLite.conf"
+          fetch_file "$BASE/rewrite/StartUpAds.conf"       "rewrite/StartUpAds.conf"
+          fetch_file "$BASE/rewrite/XiaoHongShuAds.conf"   "rewrite/XiaoHongShuAds.conf"
+          fetch_file "$BASE/scripts/zhihu.ads.js"          "scripts/zhihu.ads.js"
+          fetch_file "$BASE/scripts/bdpan.ads.js"          "scripts/bdpan.ads.js"
+          fetch_file "$BASE/scripts/bdpan.unlock.js"       "scripts/bdpan.unlock.js"
+          fetch_file "$BASE/scripts/server-info-pure.js"   "scripts/server-info-pure.js"
+          fetch_file "$BASE/filter/Ai.yaml"                "filter/Ai.yaml"
+
+      - name: Commit changes if any
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add rewrite/ scripts/ filter/
+          if git diff --staged --quiet; then
+            echo "No changes, skipping commit."
+          else
+            git commit -m "chore: auto-sync scripts from ddgksf2013.top $(date -u +'%Y-%m-%d')"
+            git push
+          fi
